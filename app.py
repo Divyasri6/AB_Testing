@@ -4,7 +4,7 @@ from streamlit_option_menu import option_menu  # pip install streamlit-option-me
 import pymongo
 
 # -------------- SETTINGS --------------
-MONGO_URI="your uri"
+MONGO_URI=st.secrets.MONGODB.MONGO_URI
 DATABASE_NAME  = "experiment"
 PROGRAM_OPTIONS = ("Email", "Home phone", "Mobile phone")
 LEVER_OPTIONS = ("timing", "phone", "ll")
