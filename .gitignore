@@ -1,2 +1,6 @@
 .streamlit/Secrets.toml
+<<<<<<< HEAD
 myenv/
+=======
+myenv/
+>>>>>>> 7b94aa5025b74d273e22415765c9b731ec98918f
