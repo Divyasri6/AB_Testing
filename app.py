@@ -6,6 +6,7 @@ import pymongo
 # -------------- SETTINGS --------------
 MONGO_URI=st.secrets.MONGODB.MONGO_URI
 DATABASE_NAME  = "experiment"
+COLLECTION_NAME="experiment_data"
 PROGRAM_OPTIONS = ("Email", "Home phone", "Mobile phone")
 LEVER_OPTIONS = ("timing", "phone", "ll")
 ATTRIBUTE_OPTIONS = ('Green', 'Yellow', 'Red', 'Blue')
@@ -19,11 +20,12 @@ def init_connection():
     try:
         client=pymongo.MongoClient(MONGO_URI)
         db = client[DATABASE_NAME]
+        collection = db[COLLECTION_NAME]
         print("Connected to MongoDB successfully!")
     except Exception as e:
         print(f"Error connecting to MongoDB: {str(e)}")
         st.stop()  # Halt execution if connection fails
-    return db
+    return collection
 
 
 def save_experiment_data(data, collection):
@@ -34,25 +36,24 @@ def save_experiment_data(data, collection):
     except Exception as e:
         st.error(f"An error occurred while saving data: {str(e)}")
 
-def drop_collection(db, collection_name):
+def drop_collection(collection, document_id):
     # Drops a collection from the MongoDB database.
     try:
-        db.drop_collection(collection_name)
-        st.success(f"Collection '{collection_name}' dropped successfully!")
+        collection.delete_one({"_id": document_id})
+        st.success(f"Collection '{document_id}' dropped successfully!")
     except Exception as e:
         st.error(f"Error dropping collection: {str(e)}")
 
-def generate_unique_id(program, lever,db):
-  # Generates a unique TableName for an experiment and create collection for mongoDB.
+def generate_unique_id(program, lever,collection):
+  # Generates a unique TableName for an experiment
       
     version_id = 1  # Start with version 1 (or adjust based on versioning logic)
     existing_id = f"{program}_{lever}_V{version_id}"
-    collist = db.list_collection_names()
-    while existing_id in collist:
+    all_ids = collection.distinct("_id")
+    while existing_id in all_ids:
         version_id += 1  # Increment version if conflict found
         existing_id = f"{program}_{lever}_V{version_id}"
-    collection = db[existing_id]
-    return existing_id,collection
+    return existing_id
 # Initialize session state
 if "experiment_data" not in st.session_state:
      st.session_state["experiment_data"] = {}
@@ -87,7 +88,7 @@ def main():
         icons=["pencil-fill", "bar-chart-fill"],  # https://icons.getbootstrap.com/
         orientation="horizontal",
     )
-    db = init_connection()  
+    collection = init_connection()  
 
     if selected == "create new Experiment":
         st.header("Data Entry")
@@ -114,13 +115,16 @@ def main():
         stages = st.number_input("Insert a number", value=1, step=1, key="levels")
         c1 = [f"{item}_{i + 1}" for i in range(int(stages)) for item in LEVEL_EXTRA]
 
-        Table_name,collection = generate_unique_id(program, lever,db)
+        Table_name = generate_unique_id(program, lever,collection)
         
         "---"
         add_row_button = st.button("Add Experiment")
         if add_row_button:
             add_row_data()
-        
+
+        main_data={
+                "_id":f"{Table_name}",
+            }
         for i in enumerate(st.session_state["row_data"]):
             num = i[0] + 1
             st.subheader(f"Row: {num}")
@@ -137,10 +141,7 @@ def main():
                 start_date = st.date_input("Start_Date", key=f"start_date_{i}")
                 end_date = st.date_input("End_Date", key=f"end_date_{i}")
                
-            if Table_name not in st.session_state["experiment_data"]:
-                    st.session_state["experiment_data"][Table_name] = {}
             data = {
-                    "_id":f"{Table_name}_{i[0]}",
                     f"{lever}":timing,
                     f"Champion_{lever}": champion_lever,
                     "Attributes": level_attr,
@@ -148,8 +149,10 @@ def main():
                     "Start_date": str(start_date),
                     "End_date": str(end_date)
                 }
-            st.session_state["experiment_data"][Table_name][f"{Table_name}_{i[0]}"] = data 
-        
+            
+            main_data[f"row {i[0]}"] = data
+            st.session_state["experiment_data"][COLLECTION_NAME] = main_data 
+        print(st.session_state["experiment_data"] )
         if st.session_state["row_data"]:
             review_button = st.button("Review Data")
             if review_button:
@@ -160,14 +163,14 @@ def main():
                 
             if st.button("Submit"):
                 try:
-                    for key, value in st.session_state["experiment_data"][Table_name].items():
-                        save_experiment_data(value, collection)
+                    #for key, value in st.session_state["experiment_data"][COLLECTION_NAME].items():
+                    save_experiment_data(main_data, collection)
                 except Exception as e:
                     st.error(f"An error occurred while saving data: {str(e)}")
                 
     elif selected == "List and Test Experiment":
         tab1, tab2 = st.tabs(["List Experiment", "Test Experiment"])
-        collist = db.list_collection_names()
+        collist = collection.distinct("_id")
         with tab1:
             st.header("Existing Experiments",divider='rainbow')
             # Display existing tables if any
@@ -185,7 +188,7 @@ def main():
                 collection_to_drop = st.selectbox("Enter table name to drop:",collist, key="collection_to_drop",index=None,)
                 if st.button("Delete experiment"):
                     if collection_to_drop:
-                        drop_collection(db, collection_to_drop)
+                        drop_collection(collection, collection_to_drop)
                     else:
                         st.error("Please enter a collection name.")
             else:
@@ -197,9 +200,10 @@ def main():
                 
                 if st.form_submit_button("generate value"):
                     Patient_id=st.text_input("Enter patient id")
-                    Test_collection = db[selected_collection]
-                    first_doc =Test_collection.find_one()
-                    attributes_object = first_doc.get("Attributes", {})
+                    Test_document = collection.find_one({"_id": selected_collection})
+                    #first_doc =Test_collection.find_one()
+                    attributes_object = Test_document.get("Attributes", {})
+                    
 
                     # Display only the keys of the attributes object
                     keys = list(attributes_object.keys()) 
@@ -212,7 +216,7 @@ def main():
                         # Query to filter documents where the entered attribute values match
                         query = {"Attributes": entered_values}
                     
-                        matched_docs = Test_collection.find(query)
+                        matched_docs = Test_document.find(query)
                         if matched_docs:
                             st.subheader("Test created:")
                             st.subheader(f"patient id : {Patient_id}" )
